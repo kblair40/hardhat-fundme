@@ -1,0 +1,41 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "contracts/FundMe.sol": {
+      "content": "// Get funds from users\n// Withdraw funds\n// Set a minimum funding value in USD\n\n// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\nimport \"./PriceConverter.sol\";\n\n// This can be more gas efficient than using 'require' in a modifier\nerror NotOwner(); // newer feature for solidity.  Expect to see 'require' in most old code examples\n\ncontract FundMe {\n    using PriceConverter for uint256;\n\n    event Funded(address indexed from, uint256 amount);\n\n    mapping(address => uint256) public addressToAmountFunded;\n    address[] public funders;\n    // if variable is only set once, but in a different line than it was instantiated, we can use 'immutable' to save on gas\n    address public owner;\n    // If we assign a variable in a contract only once, at compile time, we can make it a 'constant' to save on gas\n    // txn cost with constant 21415 -> without constant 23515\n    uint256 public constant MINIMUM_USD = 50 * 1e18;\n\n    AggregatorV3Interface public priceFeed;\n\n    constructor(address priceFeedAddress) {\n        // immediately set owner to be the address the contract was deployed by/from\n        owner = msg.sender;\n        priceFeed = AggregatorV3Interface(priceFeedAddress);\n    }\n\n    function fund() public payable {\n        require(\n            msg.value.getConversionRate(priceFeed) >= MINIMUM_USD,\n            \"Didn't send enough!\"\n        ); // if this fails, it will revert.  We can provide custom error msg as second arg\n        funders.push(msg.sender); // msg.sender is the address sending the ether;\n        addressToAmountFunded[msg.sender] = msg.value;\n    }\n\n    function withdraw() public onlyOwner {\n        // prevent anyone other than the owner from withdrawing\n        // require(msg.sender == owner, \"Sender is not owner!\");\n\n        for (\n            uint256 funderIndex = 0;\n            funderIndex < funders.length;\n            funderIndex++\n        ) {\n            address funder = funders[funderIndex];\n            addressToAmountFunded[funder] = 0;\n        }\n\n        // reset the array\n        funders = new address[](0); // (0) says init array with no length/objects in it\n        (bool callSuccess, ) = payable(msg.sender).call{\n            value: address(this).balance\n        }(\"\");\n        require(callSuccess, \"Call failed\");\n    }\n\n    // modifier is a keyword that can be added to a function declaration to modify that function's functionality\n    // functions that get the modifier do whatever is in the modifier first, then function body, then whetever is next in modifier\n    modifier onlyOwner() {\n        // require(msg.sender == owner, \"Sender isnot owner!\");\n        if (msg.sender != owner) {\n            revert NotOwner();\n        }\n        _;\n    }\n\n    // What happens if someone sends this contract ETH w/o calling the fund function?\n    // receive and fallback will make sure the function gets called anyways.\n\n    receive() external payable {\n        // just call the fund function\n        fund();\n    }\n\n    fallback() external payable {\n        // same here, just call fund\n        fund();\n    }\n}\n"
+    },
+    "contracts/PriceConverter.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\n// yarn add --dev @chainlink/contracts\nimport \"@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol\";\n\nlibrary PriceConverter {\n    function getPrice(AggregatorV3Interface priceFeed)\n        internal\n        view\n        returns (uint256)\n    {\n        // NEED TO HAVE...\n        // ABI -\n        // ADDRESS - 0x8A753747A1Fa494EC906cE90E9f37563A8AF630e\n        // AggregatorV3Interface priceFeed = AggregatorV3Interface(\n        //     0x8A753747A1Fa494EC906cE90E9f37563A8AF630e\n        // );\n\n        (, int256 price, , , ) = priceFeed.latestRoundData();\n        // ETH in terms of USD\n\n        // cast int256 to uint256, to match msg.value\n        return uint256(price * 1e10); // 1**10 == 10000000000\n    }\n\n    function getConversionRate(\n        uint256 ethAmount,\n        AggregatorV3Interface priceFeed\n    ) internal view returns (uint256) {\n        uint256 ethPrice = getPrice(priceFeed);\n        // dividing by 1e18 ensures the result has 18 decimal places.  Make sure division happens last.\n        uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1e18;\n\n        return ethAmountInUsd;\n\n        // EX. 3000_000000000000000000 = ETH / USD price\n        // We send 1_000000000000000000 ETH to this contract, which equals $3000 (above)\n        // To get price, multiply them together, and divide by 1e18 to get the 18 decimal places\n    }\n}\n"
+    },
+    "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ninterface AggregatorV3Interface {\n  function decimals() external view returns (uint8);\n\n  function description() external view returns (string memory);\n\n  function version() external view returns (uint256);\n\n  // getRoundData and latestRoundData should both raise \"No data present\"\n  // if they do not have data to report, instead of returning unset values\n  // which could be misinterpreted as actual reported values.\n  function getRoundData(uint80 _roundId)\n    external\n    view\n    returns (\n      uint80 roundId,\n      int256 answer,\n      uint256 startedAt,\n      uint256 updatedAt,\n      uint80 answeredInRound\n    );\n\n  function latestRoundData()\n    external\n    view\n    returns (\n      uint80 roundId,\n      int256 answer,\n      uint256 startedAt,\n      uint256 updatedAt,\n      uint80 answeredInRound\n    );\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode",
+          "evm.methodIdentifiers",
+          "metadata",
+          "devdoc",
+          "userdoc",
+          "storageLayout",
+          "evm.gasEstimates"
+        ],
+        "": [
+          "ast"
+        ]
+      }
+    },
+    "metadata": {
+      "useLiteralContent": true
+    }
+  }
+}
